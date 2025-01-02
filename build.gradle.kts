@@ -184,6 +184,7 @@ repositories {
     maven("https://oss.sonatype.org/content/repositories/snapshots")
     maven("https://s01.oss.sonatype.org/content/repositories/snapshots")
     maven("https://nexus.scarsz.me/content/groups/public/")
+    maven("https://repo.papermc.io/repository/maven-public/")
 }
 
 dependencies {

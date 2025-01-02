@@ -46,11 +46,12 @@ import org.jetbrains.annotations.NotNull;
 
 public class LuckPermsHook implements PluginHook, net.luckperms.api.context.ContextCalculator<Player> {
 
+    private static final String META_BOOSTING = "discordsrv:boosting";
     private static final String CONTEXT_LINKED = "discordsrv:linked";
-    private static final String CONTEXT_BOOSTING = "discordsrv:boosting";
     private static final String CONTEXT_ROLE = "discordsrv:role";
     private static final String CONTEXT_ROLE_ID = "discordsrv:role_id";
     private static final String CONTEXT_SERVER_ID = "discordsrv:server_id";
+    private static final String PERMISSION_BOOSTER_KIT = "essentials.kits.booster";
 
     private final net.luckperms.api.LuckPerms luckPerms;
     private final Set<net.luckperms.api.event.EventSubscription<?>> subscriptions = new HashSet<>();
@@ -121,46 +122,66 @@ public class LuckPermsHook implements PluginHook, net.luckperms.api.context.Cont
         UUID uuid = target.getUniqueId();
         AccountLinkManager accountLinkManager = DiscordSRV.getPlugin().getAccountLinkManager();
         if (!accountLinkManager.isInCache(uuid)) {
-            // this *shouldn't* happen
             DiscordSRV.debug(Debug.LP_CONTEXTS, "Player " + target + " was not in cache when LP contexts were requested, unable to provide contexts data (online player: " + Bukkit.getPlayer(uuid) + ")");
+            revokeGlobalPermission(uuid, PERMISSION_BOOSTER_KIT);
             return;
         }
         String userId = accountLinkManager.getDiscordIdFromCache(uuid);
         consumer.accept(CONTEXT_LINKED, Boolean.toString(userId != null));
 
         if (userId == null) {
+            revokeGlobalPermission(uuid, PERMISSION_BOOSTER_KIT);
             return;
         }
 
         User user = DiscordUtil.getJda().getUserById(userId);
-        if (user == null) return;
-
-        for (Guild guild : DiscordUtil.getJda().getGuilds()) {
-            if (guild.getMember(user) == null) continue;
-
-            consumer.accept(CONTEXT_SERVER_ID, guild.getId());
+        if (user == null) {
+            revokeGlobalPermission(uuid, PERMISSION_BOOSTER_KIT);
+            return;
         }
 
         Guild mainGuild = DiscordSRV.getPlugin().getMainGuild();
-        if (mainGuild == null) {
-            return;
-        }
+        if (mainGuild != null) {
+            Member member = mainGuild.getMemberById(userId);
+            if (member != null) {
+                boolean isBoosting = member.getTimeBoosted() != null;
+                setGlobalMeta(uuid, META_BOOSTING, Boolean.toString(isBoosting));
 
-        Member member = mainGuild.getMemberById(userId);
-        if (member == null) {
-            return;
-        }
-
-        consumer.accept(CONTEXT_BOOSTING, Boolean.toString(member.getTimeBoosted() != null));
-
-        for (Role role : member.getRoles()) {
-            if (StringUtils.isBlank(role.getName())) {
-                continue;
+                if (isBoosting) {
+                    grantGlobalPermission(uuid, PERMISSION_BOOSTER_KIT);
+                } else {
+                    revokeGlobalPermission(uuid, PERMISSION_BOOSTER_KIT);
+                }
+            } else {
+                revokeGlobalPermission(uuid, PERMISSION_BOOSTER_KIT);
             }
-            consumer.accept(CONTEXT_ROLE, role.getName());
-            consumer.accept(CONTEXT_ROLE_ID, role.getId());
+        } else {
+            revokeGlobalPermission(uuid, PERMISSION_BOOSTER_KIT);
         }
+    }
 
+    private void setGlobalMeta(UUID playerUuid, String key, String value) {
+        net.luckperms.api.model.user.User user = luckPerms.getUserManager().getUser(playerUuid);
+        if (user != null) {
+            user.data().add(net.luckperms.api.node.types.MetaNode.builder(key, value).build());
+            luckPerms.getUserManager().saveUser(user);
+        }
+    }
+
+    private void grantGlobalPermission(UUID playerUuid, String permission) {
+        net.luckperms.api.model.user.User user = luckPerms.getUserManager().getUser(playerUuid);
+        if (user != null) {
+            user.data().add(net.luckperms.api.node.types.PermissionNode.builder(permission).build());
+            luckPerms.getUserManager().saveUser(user);
+        }
+    }
+
+    private void revokeGlobalPermission(UUID playerUuid, String permission) {
+        net.luckperms.api.model.user.User user = luckPerms.getUserManager().getUser(playerUuid);
+        if (user != null) {
+            user.data().remove(net.luckperms.api.node.types.PermissionNode.builder(permission).build());
+            luckPerms.getUserManager().saveUser(user);
+        }
     }
 
     @Override
@@ -169,9 +190,6 @@ public class LuckPermsHook implements PluginHook, net.luckperms.api.context.Cont
 
         builder.add(CONTEXT_LINKED, "true");
         builder.add(CONTEXT_LINKED, "false");
-
-        builder.add(CONTEXT_BOOSTING, "true");
-        builder.add(CONTEXT_BOOSTING, "false");
 
         Guild mainGuild = DiscordSRV.getPlugin().getMainGuild();
         if (mainGuild != null) {
@@ -195,5 +213,4 @@ public class LuckPermsHook implements PluginHook, net.luckperms.api.context.Cont
     public Plugin getPlugin() {
         return PluginUtil.getPlugin("LuckPerms");
     }
-
 }
